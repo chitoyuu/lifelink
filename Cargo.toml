@@ -1,6 +1,8 @@
 [package]
 name = "lifelink"
 description = "Erase covariant lifetime parameters from anything, with generic associated types."
+repository = "https://github.com/chitoyuu/lifelink"
+documentation = "https://docs.rs/lifelink"
 authors = ["Chitose Yuuzaki <chitoyuu@potatoes.gay>"]
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
