@@ -122,3 +122,7 @@ Ideally, users shouldn't have to provide their own `unsafe` `Cov` implementation
 ## Feature flags
 
 - `nightly` - Adds `feature(generic_associated_types)` to the top of the crate, which would allow the crate to compile on a nightly compiler. **Required** as of Oct. 2021.
+
+## License
+
+MIT OR Apache-2.0
