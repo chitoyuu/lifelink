@@ -4,7 +4,7 @@ Erase covariant lifetime parameters from anything, with generic associated types
 
 ```toml
 [dependencies]
-lifelink = { version = "0.1.0", features = ["nightly"] }
+lifelink = { version = "0.1.1", features = ["nightly"] }
 ```
 
 Like `cryo`, `lifelink` allows you to use the resulting types in dynamic environments where lifetime is unpredictable, like runtimes of garbage-collected scripting languages, or where `Any` is required. Unlike `cryo`, the interface is not restricted to primitive references: it works on everything with covariant lifetime parameters though GATs.
@@ -63,17 +63,11 @@ impl<T: 'static> Ctor for AnswersCtor<T> {
     type Ty<'a> = Answers<'a, 'a, 'a, T>;
 }
 
-// Although this impl is `unsafe`, the requirement of a `cov` implementation
-// still allows Rust to prevent human mistakes. See the Caveats section for
-// more details.
-unsafe impl<T: 'static> Cov for AnswersCtor<T> {
-    fn cov<'r, 'a, 'b>(r: &'r Self::Ty<'a>) -> &'r Self::Ty<'b>
-    where
-        'a: 'b,
-    {
-        r
-    }
-}
+// An invocation of `lifelink::cov!` on the constructor type is required
+// to prove covariance to the type system. This only compiles for types that
+// can be proved by Rust to be covariant. See docs on the Cov trait for more
+// details.
+lifelink::cov!(<T: 'static> AnswersCtor<T>);
 
 fn compute<'a, 'b, 'c>(answers: Answers<'a, 'b, 'c, ()>) {
     let (mut lifelink, deathtouch) = Lifelink::<AnswersCtor<()>>::new(answers);
@@ -116,8 +110,6 @@ compute(Answers {
 `Lifelink` can only ever give out shared / immutable references. This is because Rust allows moves by default, making mutable references to types with lifetime parameters too hard to reason about, and almost impossible to use correctly unless reduced to uselessness. Instead, users have to use interior mutability in a way that maintains covariance (which, thankfully, Rust will help prove in a `Cov` impl).
 
 Unlike `cryo`, `lifelink` does *not* attempt to wait until the `'static` handle is dropped. It's more than happy to drop or unwrap a `Deathtouch`, if there isn't a `Guard` in scope somewhere that *precise moment*. This may come as surprising, but is a conscious decision to make `lifelink` work in tandem with environments where lifetime is unpredictable, e.g. a garbage collected scripting language, where it's much better to get a error than a deadlock from a misbehaving script. As such, a way to wait for task completion external to `lifelink` is required.
-
-Ideally, users shouldn't have to provide their own `unsafe` `Cov` implementations. However, there is no way to assert covariance at the type level in Rust today. As such, the burden to prove covariance have to be passed on to the users.
 
 ## Feature flags
 
