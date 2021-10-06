@@ -178,8 +178,7 @@ pub trait Ctor {
 /// Trait for type constructors that produce types whose references are covariant over the
 /// lifetime parameter.
 ///
-/// For most valid types, this could simply be implemented by returning the input reference
-/// to `cov` and letting Rust figure out the rest:
+/// For most valid types, this could implemented by simply invoking [`cov!`]:
 ///
 /// ```rust
 /// #![feature(generic_associated_types)]
@@ -191,14 +190,7 @@ pub trait Ctor {
 ///     type Ty<'a> = Foo<'a>;
 /// }
 ///
-/// unsafe impl Cov for FooCtor {
-///     fn cov<'r, 'a, 'b>(r: &'r Self::Ty<'a>) -> &'r Self::Ty<'b>
-///     where
-///         'a: 'b,
-///     {
-///         r
-///     }
-/// }
+/// cov!(FooCtor);
 /// ```
 ///
 /// # Safety
@@ -207,13 +199,38 @@ pub trait Ctor {
 /// parameter.
 ///
 /// This trait is `unsafe` for the reason that it is trivial to write a type-checking
-/// implementation of `cov` that is unsound, for every type out there, simply by writing
-/// `panic!()`. The trait method is never actually called by the library. It's only here because
-/// it's helpful for detecting bugs.
+/// implementation of `cov` for every type out there, simply by writing `panic!()`.
+/// Lifetime variance is hard to figure out in a complex type. It's safest to use the [`cov!`]
+/// macro for applicable types, unless you are really sure that you know better than the compiler.
 pub unsafe trait Cov: Ctor {
     fn cov<'r, 'a, 'b>(r: &'r Self::Ty<'a>) -> &'r Self::Ty<'b>
     where
         'a: 'b;
+}
+
+/// Macro that implements [`Cov`] safely for a [`Ctor`] type.
+///
+/// [`Cov::cov`] is implemented by simply returning the input reference and letting Rust coerce it.
+/// This should work automatically for most types that are actually covariant. In case `cov!(MyType)`
+/// does not compile, users would need to provide their own `unsafe` [`Cov`] implementation.
+///
+/// See [`Cov`] for an example.
+#[macro_export]
+macro_rules! cov {
+    (<$($tv:ident $(: $bound:tt $(+ $bounds:tt)*)?),*> $thing:ty) => {
+        unsafe impl<$($tv $(: $bound $(+ $bounds)*)?),*> $crate::Cov for $thing {
+            fn cov<'r, 'a, 'b>(r: &'r <Self as $crate::Ctor>::Ty<'a>) -> &'r <Self as $crate::Ctor>::Ty<'b>
+            where
+                'a: 'b,
+            {
+                r
+            }
+        }
+    };
+
+    ($thing:ty) => {
+        $crate::cov!(<> $thing);
+    };
 }
 
 /// Marker trait implemented for [`Ctor`]s where the constructed types are `Send`.
@@ -247,15 +264,7 @@ impl<T: 'static> Ctor for RefCtor<T> {
     type Ty<'a> = &'a T;
 }
 
-// SAFETY: &'a T is covariant over 'a when T is 'static
-unsafe impl<T: 'static> Cov for RefCtor<T> {
-    fn cov<'r, 'a, 'b>(r: &'r Self::Ty<'a>) -> &'r Self::Ty<'b>
-    where
-        'a: 'b,
-    {
-        r
-    }
-}
+cov!(<T: 'static> RefCtor<T>);
 
 #[cfg(test)]
 mod tests {
