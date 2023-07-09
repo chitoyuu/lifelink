@@ -4,27 +4,25 @@ Erase covariant lifetime parameters from anything, with generic associated types
 
 ```toml
 [dependencies]
-lifelink = { version = "0.1.1", features = ["nightly"] }
+lifelink = { version = "0.1.1" }
 ```
 
 Like `cryo`, `lifelink` allows you to use the resulting types in dynamic environments where lifetime is unpredictable, like runtimes of garbage-collected scripting languages, or where `Any` is required. Unlike `cryo`, the interface is not restricted to primitive references: it works on everything with covariant lifetime parameters though GATs.
 
-**Requires a nightly compiler as of Oct. 2021**, due to the use of `feature(generic_associated_types)`.
+The `generic_associated_types` feature has been stabilized in Rust 1.65. If a pinned nightly compiler before the stabilization release is required, the `nightly` feature can be enabled which adds the appropriate `feature` attribute.
 
 ## Examples
 
 Simple case with just a reference:
 
 ```rust
-#![feature(generic_associated_types)]
-
 use std::thread::spawn;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use lifelink::{Lifelink, RefCtor};
+use lifelink::{lifelink, Lifelink, RefCtor};
 
 let answer = AtomicUsize::new(0);
 
-let (mut lifelink, deathtouch) = Lifelink::<RefCtor<AtomicUsize>>::new(&answer);
+lifelink!(lifelink: RefCtor<AtomicUsize> = &answer);
 
 {
     let guard = lifelink.get().unwrap();
@@ -32,21 +30,20 @@ let (mut lifelink, deathtouch) = Lifelink::<RefCtor<AtomicUsize>>::new(&answer);
     guard.store(42, Ordering::Release);
 }
 
-assert_eq!(42, deathtouch.unwrap().load(Ordering::Acquire));
+assert_eq!(42, answer.load(Ordering::Acquire));
 ```
 
 A more involved example with multiple lifetime parameters, unrelated type parameters. and threads:
 
 ```rust
-#![feature(generic_associated_types)]
-
 use std::thread::spawn;
 use std::time::Duration;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 use std::marker::PhantomData;
-use lifelink::{Lifelink, Ctor, Cov};
+use lifelink::{lifelink, Lifelink, Ctor, Cov};
 
+#[derive(Copy, Clone)]
 struct Answers<'a, 'b, 'c, T> {
     first: &'a AtomicUsize,
     second: &'b AtomicUsize,
@@ -70,7 +67,7 @@ impl<T: 'static> Ctor for AnswersCtor<T> {
 lifelink::cov!(<T: 'static> AnswersCtor<T>);
 
 fn compute<'a, 'b, 'c>(answers: Answers<'a, 'b, 'c, ()>) {
-    let (mut lifelink, deathtouch) = Lifelink::<AnswersCtor<()>>::new(answers);
+    lifelink!(lifelink: AnswersCtor<()> = answers);
     let (send, recv) = channel();
     
     spawn(move || {
@@ -87,7 +84,6 @@ fn compute<'a, 'b, 'c>(answers: Answers<'a, 'b, 'c, ()>) {
     // details, and the rationale behind this decision.
     recv.recv_timeout(Duration::from_millis(20)).unwrap();
 
-    let answers = deathtouch.unwrap();
     assert_eq!(42, answers.first.load(Ordering::Acquire));
     assert_eq!(42, answers.second.load(Ordering::Acquire));
     assert_eq!(42, answers.third.load(Ordering::Acquire));
@@ -113,7 +109,7 @@ Unlike `cryo`, `lifelink` does *not* attempt to wait until the `'static` handle 
 
 ## Feature flags
 
-- `nightly` - Adds `feature(generic_associated_types)` to the top of the crate, which would allow the crate to compile on a nightly compiler. **Required** as of Oct. 2021.
+- `nightly` - Adds `feature(generic_associated_types)` to the top of the crate, which would allow the crate to compile on a nightly compiler earlier than 1.65 (when the feature was stabilized).
 
 ## License
 
