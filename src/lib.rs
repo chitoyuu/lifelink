@@ -28,26 +28,64 @@ pub struct Lifelink<C: Ctor> {
 unsafe impl<C: SendCtor> Send for Lifelink<C> {}
 unsafe impl<C: SendCtor> Sync for Lifelink<C> {}
 
+/// Safe helper macro for creating a [`Lifelink`] value wrapping `thing`. The lifetime
+/// of this [`Lifelink`] value will be managed by the Rust compiler, and the `thing`
+/// passed in cannot be retrieved.
+///
+/// If you need a way to later retrieve ownership of the `thing` value passed in, see
+/// the unsafe [`Lifelink::new`] constructor which this macro uses internally.
+///
+/// # Example
+///
+/// ```rust
+/// use std::thread::spawn;
+/// use std::sync::atomic::{AtomicUsize, Ordering};
+/// use lifelink::{lifelink, Lifelink, RefCtor};
+///
+/// let answer = AtomicUsize::new(0);
+///
+/// lifelink!(lifelink: RefCtor<AtomicUsize> = &answer);
+///
+/// {
+///     let guard = lifelink.get().unwrap();
+///     assert_eq!(0, guard.load(Ordering::Relaxed));
+///     guard.store(42, Ordering::Release);
+/// }
+///
+/// assert_eq!(42, answer.load(Ordering::Acquire));
+/// ```
+#[macro_export]
+macro_rules! lifelink {
+    ($lifelink:ident : $ty:ty = $thing:expr) => {
+        let (mut $lifelink, _deathtouch) = unsafe { $crate::Lifelink::<$ty>::new($thing) };
+    };
+}
+
 impl<C: Ctor> Lifelink<C> {
     /// Create a pair of [`Lifelink`] and [`Deathtouch`] values wrapping `thing`, which
     /// will be kept alive and accessible through `Lifelink` until the [`Deathtouch`]
     /// is dropped.
     ///
-    /// Calling [`Lifelink::new`] is safe as long as `C::Ty` values are covariant over the
-    /// lifetime parameter.
+    /// The safety of this function depends on the resulting [`Deathtouch`] value being
+    /// unwrapped or dropped. For a safe way to construct [`Lifelink`] in exchange for
+    /// the ability to access [`Deathtouch`], see the [`lifelink!`] macro.
+    ///
+    /// # Safety
+    ///
+    /// `C::Ty` values must be covariant over the lifetime parameter, and the resulting
+    /// [`Deathtouch`] value must be unwrapped or dropped (i.e. not forgotten). For more
+    /// details on the latter requirement, see https://github.com/chitoyuu/lifelink/issues/2.
     ///
     /// # Example
     ///
     /// ```rust
-    /// #![feature(generic_associated_types)]
-    ///
     /// use std::thread::spawn;
     /// use std::sync::atomic::{AtomicUsize, Ordering};
     /// use lifelink::{Lifelink, RefCtor};
     ///
     /// let answer = AtomicUsize::new(0);
     ///
-    /// let (mut lifelink, deathtouch) = Lifelink::<RefCtor<AtomicUsize>>::new(&answer);
+    /// let (mut lifelink, deathtouch) = unsafe { Lifelink::<RefCtor<AtomicUsize>>::new(&answer) };
     ///
     /// {
     ///     let guard = lifelink.get().unwrap();
@@ -58,7 +96,7 @@ impl<C: Ctor> Lifelink<C> {
     /// assert_eq!(42, deathtouch.unwrap().load(Ordering::Acquire));
     /// ```
     #[allow(clippy::needless_lifetimes)] // False positive
-    pub fn new<'a>(thing: C::Ty<'a>) -> (Lifelink<C>, Deathtouch<'a, C>) {
+    pub unsafe fn new<'a>(thing: C::Ty<'a>) -> (Lifelink<C>, Deathtouch<'a, C>) {
         let thing = Box::new(thing);
         let ptr = Box::into_raw(thing) as *mut u8;
         let inner = Arc::new(Mutex::new(ptr));
@@ -181,7 +219,6 @@ pub trait Ctor {
 /// For most valid types, this could implemented by simply invoking [`cov!`]:
 ///
 /// ```rust
-/// #![feature(generic_associated_types)]
 /// # use lifelink::*;
 ///
 /// struct FooCtor;
@@ -279,7 +316,7 @@ mod tests {
         let mut leaked;
 
         {
-            let (mut lifelink, _deathtouch) = Lifelink::<RefCtor<AtomicUsize>>::new(&answer);
+            lifelink!(lifelink: RefCtor<AtomicUsize> = &answer);
             assert_eq!(
                 Some(0),
                 lifelink.get().map(|foo| foo.load(Ordering::Relaxed))
@@ -297,7 +334,7 @@ mod tests {
 
         let answer = AtomicUsize::new(0);
 
-        let (mut lifelink, deathtouch) = Lifelink::<RefCtor<AtomicUsize>>::new(&answer);
+        lifelink!(lifelink: RefCtor<AtomicUsize> = &answer);
         let (send, recv) = channel();
 
         spawn(move || {
@@ -309,6 +346,6 @@ mod tests {
 
         recv.recv_timeout(Duration::from_millis(20)).unwrap();
 
-        assert_eq!(42, deathtouch.unwrap().load(Ordering::Acquire));
+        assert_eq!(42, answer.load(Ordering::Acquire));
     }
 }
